@@ -25,6 +25,24 @@ VERTICAL_PRESETS = {
         "case fill rate target >98%, promotional demand spikes, sustainability "
         "packaging mandates. Benchmark orgs: P&G, Unilever, Nestle."
     ),
+    "aerospace": (
+        "Aerospace & Defense. AS9100D quality management compliance, extremely long "
+        "lead times (12-36 months for critical parts), MRO (maintenance, repair, overhaul) "
+        "supply chain complexity, ITAR/EAR export control compliance, rigorous traceability "
+        "requirements for every serialized part, zero-defect manufacturing culture. "
+        "Supplier qualification cycles 12-24 months. Key benchmarks: on-time delivery "
+        ">95%, parts traceability 100%, ITAR compliance 100%. "
+        "Benchmark orgs: Boeing, Airbus, Lockheed Martin, Raytheon."
+    ),
+    "healthcare": (
+        "Healthcare & Medical Devices. UDI (Unique Device Identification) traceability, "
+        "sterile supply chain integrity, GPO (Group Purchasing Organization) contract "
+        "compliance, FDA 21 CFR Part 820 QSR compliance, hospital consignment inventory "
+        "management, RFID-enabled inventory accuracy, cold chain for biologics. "
+        "Key benchmarks: stockout rate <0.5% for critical items, recall response <24hrs, "
+        "inventory accuracy >99.5%, supplier audit coverage 100% for Class III devices. "
+        "Benchmark orgs: Medtronic, Stryker, Becton Dickinson, Johnson & Johnson MedTech."
+    ),
     "general": (
         "General mid-size manufacturing company. Apply standard SCOR and Gartner "
         "supply chain benchmarks across all domains."

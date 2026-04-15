@@ -1,0 +1,284 @@
+import streamlit as st
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+
+from agent import SupplyChainHealthAgent
+from scoring import interpret_score
+from domains import DOMAINS
+from verticals import VERTICAL_PRESETS
+
+# ── Page config ───────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Supply Chain Health Agent",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(135deg, #1E1A4E 0%, #534AB7 100%);
+        padding: 2rem; border-radius: 12px; margin-bottom: 1.5rem; color: white;
+    }
+    .main-header h1 { color: white; margin: 0; font-size: 2rem; }
+    .main-header p  { color: #AFA9EC; margin: 0.5rem 0 0; font-size: 1rem; }
+    .score-card {
+        background: white; border: 1px solid #E0E0E0; border-radius: 10px;
+        padding: 1rem; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    }
+    .score-overall {
+        background: linear-gradient(135deg, #534AB7, #0F6E56);
+        color: white; border-radius: 12px; padding: 1.5rem; text-align: center;
+    }
+    .domain-pill {
+        display: inline-block; background: #EEEDFE; color: #534AB7;
+        border-radius: 20px; padding: 3px 12px; font-size: 0.8rem;
+        margin: 2px; font-weight: 500;
+    }
+    .section-header {
+        border-left: 4px solid #534AB7; padding-left: 0.75rem;
+        margin: 1.5rem 0 0.75rem; font-weight: 600; color: #2C2C2A;
+    }
+    .risk-box {
+        background: #FCEBEB; border-left: 4px solid #E24B4A;
+        border-radius: 0 8px 8px 0; padding: 0.75rem 1rem; margin: 0.5rem 0;
+    }
+    .rec-box {
+        background: #E1F5EE; border-left: 4px solid #0F6E56;
+        border-radius: 0 8px 8px 0; padding: 0.75rem 1rem; margin: 0.5rem 0;
+    }
+    .chat-user { background: #EEEDFE; border-radius: 12px 12px 4px 12px; padding: 0.75rem 1rem; margin: 0.5rem 0; }
+    .chat-agent { background: #F1EFE8; border-radius: 12px 12px 12px 4px; padding: 0.75rem 1rem; margin: 0.5rem 0; }
+    div[data-testid="stProgress"] > div { background: #534AB7 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Session state ──────────────────────────────────────────────────────────────
+if "agent" not in st.session_state:
+    st.session_state.agent = None
+if "result" not in st.session_state:
+    st.session_state.result = None
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "assessment_done" not in st.session_state:
+    st.session_state.assessment_done = False
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="main-header">
+    <h1>🤖 Supply Chain Health Agent</h1>
+    <p>AI-powered end-to-end supply chain diagnostics · Powered by Anthropic Claude SDK</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Domain pills
+domains_html = "".join(f'<span class="domain-pill">{d["label"]}</span>' for d in DOMAINS)
+st.markdown(domains_html, unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### ⚙️ Configuration")
+
+    vertical_labels = {
+        "general": "🏭 General",
+        "semiconductor": "💾 Semiconductor",
+        "automotive": "🚗 Automotive",
+        "pharma": "💊 Pharmaceutical",
+        "retail": "🛒 Retail & E-commerce",
+        "cpg": "📦 Consumer Packaged Goods",
+        "aerospace": "✈️ Aerospace & Defense",
+        "healthcare": "🏥 Healthcare",
+    }
+
+    vertical_options = list(vertical_labels.keys())
+    vertical = st.selectbox(
+        "Industry Vertical",
+        vertical_options,
+        format_func=lambda x: vertical_labels[x],
+        index=0
+    )
+
+    mode = st.radio(
+        "Assessment Mode",
+        ["general", "custom"],
+        format_func=lambda x: "⚡ General (instant benchmark)" if x == "general" else "✏️ Custom (describe your org)"
+    )
+
+    st.markdown("---")
+    st.markdown("### 📊 Score Guide")
+    score_guide = [
+        ("🟢 80–100", "Excellent — World-class"),
+        ("🔵 60–79",  "Good — Above average"),
+        ("🟡 40–59",  "Fair — Improvement needed"),
+        ("🔴 0–39",   "At Risk — Urgent action"),
+    ]
+    for band, desc in score_guide:
+        st.markdown(f"**{band}** {desc}")
+
+    st.markdown("---")
+    st.markdown("### 🔗 Links")
+    st.markdown("[GitHub Repo](https://github.com/dwnjuguna/supply-chain-health-agent)")
+    st.markdown("[Anthropic Docs](https://docs.anthropic.com)")
+    st.markdown("[SCOR Model](https://www.ascm.org/learning-development/scor/)")
+
+# ── Custom inputs ─────────────────────────────────────────────────────────────
+custom_inputs = {}
+if mode == "custom":
+    st.markdown('<div class="section-header">📝 Describe Your Supply Chain</div>', unsafe_allow_html=True)
+    st.caption("Fill in as many domains as you can. Leave blank if not applicable — Claude will flag the gap.")
+
+    col1, col2 = st.columns(2)
+    for i, domain in enumerate(DOMAINS):
+        with col1 if i % 2 == 0 else col2:
+            val = st.text_area(
+                domain["label"],
+                placeholder=f"Describe your current {domain['label'].lower()} state, metrics, tools, and challenges...",
+                height=90,
+                key=f"input_{domain['key']}"
+            )
+            if val.strip():
+                custom_inputs[domain["label"]] = val
+
+# ── Run assessment ─────────────────────────────────────────────────────────────
+col_btn1, col_btn2, _ = st.columns([1, 1, 4])
+with col_btn1:
+    run_clicked = st.button("🚀 Run Assessment", type="primary", use_container_width=True)
+with col_btn2:
+    if st.button("🔄 Reset", use_container_width=True):
+        st.session_state.agent = None
+        st.session_state.result = None
+        st.session_state.chat_history = []
+        st.session_state.assessment_done = False
+        st.rerun()
+
+if run_clicked:
+    st.session_state.agent = SupplyChainHealthAgent(vertical=vertical)
+    st.session_state.chat_history = []
+    st.session_state.assessment_done = False
+
+    with st.spinner("🔍 Claude is analyzing your supply chain..."):
+        if mode == "custom" and custom_inputs:
+            result = st.session_state.agent.run_custom_assessment(custom_inputs)
+        else:
+            result = st.session_state.agent.run_general_assessment()
+
+    st.session_state.result = result
+    st.session_state.assessment_done = True
+    st.rerun()
+
+# ── Results ───────────────────────────────────────────────────────────────────
+if st.session_state.assessment_done and st.session_state.result:
+    result = st.session_state.result
+    scores_data = result.get("scores") or {}
+    domain_scores = scores_data.get("scores", {})
+    overall = scores_data.get("overall", "N/A")
+
+    st.markdown("---")
+    st.markdown('<div class="section-header">📈 Domain Health Scores</div>', unsafe_allow_html=True)
+
+    # Overall score
+    rating, desc = interpret_score(int(overall)) if isinstance(overall, (int, float)) else ("N/A", "")
+    col_ov, col_sp = st.columns([1, 3])
+    with col_ov:
+        st.markdown(f"""
+        <div class="score-overall">
+            <div style="font-size:3rem;font-weight:700">{overall}</div>
+            <div style="font-size:1rem;opacity:0.85">Overall Score</div>
+            <div style="font-size:0.9rem;margin-top:4px">{rating}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_sp:
+        st.caption(f"Industry vertical: **{vertical_labels.get(vertical, vertical)}** | {desc}")
+        if domain_scores:
+            for domain, score in domain_scores.items():
+                r, _ = interpret_score(int(score))
+                color = "#1D9E75" if score >= 80 else "#3B8BD4" if score >= 60 else "#BA7517" if score >= 40 else "#E24B4A"
+                st.markdown(f"**{domain.capitalize()}** — {score}/100 &nbsp; `{r}`")
+                st.progress(score / 100)
+
+    # Narrative sections
+    narrative = result.get("narrative", "")
+    if narrative:
+        sections = {
+            "EXECUTIVE SUMMARY": ("📋 Executive Summary", "info"),
+            "TOP RISKS": ("⚠️ Top Risks", "error"),
+            "DOMAIN HIGHLIGHTS": ("🏷️ Domain Highlights", "success"),
+            "PRIORITY RECOMMENDATIONS": ("✅ Priority Recommendations", "success"),
+        }
+
+        current_section = None
+        section_text = {}
+        lines = narrative.split("\n")
+        for line in lines:
+            matched = False
+            for key in sections:
+                if key in line.upper():
+                    current_section = key
+                    section_text[key] = []
+                    matched = True
+                    break
+            if not matched and current_section:
+                section_text[current_section].append(line)
+
+        for key, (title, _) in sections.items():
+            if key in section_text:
+                content = "\n".join(section_text[key]).strip()
+                if content:
+                    st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
+                    if key == "TOP RISKS":
+                        st.markdown(f'<div class="risk-box">{content.replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
+                    elif key == "PRIORITY RECOMMENDATIONS":
+                        st.markdown(f'<div class="rec-box">{content.replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(content)
+
+    # ── Follow-up Q&A ──────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<div class="section-header">💬 Follow-up Q&A</div>', unsafe_allow_html=True)
+    st.caption("Ask Claude anything about your results — drill into any domain, get board summaries, action plans, and more.")
+
+    # Chat history display
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(f'<div class="chat-user">🧑 {msg["content"]}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="chat-agent">🤖 {msg["content"]}</div>', unsafe_allow_html=True)
+
+    # Suggested questions
+    suggestions = [
+        "What are the top 3 actions for the next 90 days?",
+        "How do we compare to world-class benchmarks?",
+        "Give me a board-level summary in 3 bullet points",
+        "Which domain has the highest ROI for improvement?",
+    ]
+    st.markdown("**💡 Suggested questions:**")
+    cols = st.columns(2)
+    for i, suggestion in enumerate(suggestions):
+        with cols[i % 2]:
+            if st.button(suggestion, key=f"sugg_{i}", use_container_width=True):
+                with st.spinner("Claude is thinking..."):
+                    reply = st.session_state.agent.ask_followup(suggestion)
+                st.session_state.chat_history.append({"role": "user", "content": suggestion})
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                st.rerun()
+
+    # Free-text input
+    user_q = st.chat_input("Ask a follow-up question about your supply chain health...")
+    if user_q:
+        with st.spinner("Claude is thinking..."):
+            reply = st.session_state.agent.ask_followup(user_q)
+        st.session_state.chat_history.append({"role": "user", "content": user_q})
+        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        st.rerun()
+
+# ── Footer ─────────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown(
+    "<center><small>Built with ❤️ using the Anthropic Claude SDK · "
+    "<a href='https://github.com/dwnjuguna/supply-chain-health-agent'>GitHub</a> · MIT License</small></center>",
+    unsafe_allow_html=True
+)
